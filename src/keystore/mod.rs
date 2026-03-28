@@ -36,12 +36,12 @@ impl KeyStore for NullStore {
 }
 
 /// In-memory store for testing. Avoids filesystem side effects.
-#[cfg(test)]
+#[doc(hidden)]
 pub struct MemoryStore {
     store: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 impl MemoryStore {
     pub fn new() -> Self {
         Self {
@@ -50,14 +50,14 @@ impl MemoryStore {
     }
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 impl Default for MemoryStore {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 impl KeyStore for MemoryStore {
     fn save(&self, group_name: &str, key_data: &[u8]) -> Result<(), JanusError> {
         self.store

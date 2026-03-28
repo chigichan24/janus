@@ -1,17 +1,18 @@
 use std::fs;
-use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use age::secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
 use crate::error::JanusError;
+use crate::keystore::KeyStore;
 
 const JANUS_DIR: &str = ".janus";
 const GROUPS_DIR: &str = "groups";
 const META_FILE: &str = "meta.toml";
 const BUNDLE_FILE: &str = "bundle.age";
 
+/// Group metadata stored in `.janus/groups/<name>/meta.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Group {
     pub name: String,
@@ -19,6 +20,14 @@ pub struct Group {
     pub public_key: String,
     #[serde(default)]
     pub created_at: Option<u64>,
+}
+
+/// Holds shared context for group operations: repository root, SSH identity
+/// for bundle fallback, and the key storage backend.
+pub struct GroupContext {
+    pub repo_root: PathBuf,
+    pub identity_path: PathBuf,
+    pub keystore: Box<dyn KeyStore>,
 }
 
 fn validate_group_name(name: &str) -> Result<(), JanusError> {
@@ -43,47 +52,8 @@ fn dedup_members(members: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn groups_dir(repo_root: &Path, name: &str) -> std::path::PathBuf {
+fn groups_dir(repo_root: &Path, name: &str) -> PathBuf {
     repo_root.join(JANUS_DIR).join(GROUPS_DIR).join(name)
-}
-
-fn home_dir() -> Result<std::path::PathBuf, JanusError> {
-    std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .map_err(|_| JanusError::Config("HOME environment variable is not set".into()))
-}
-
-fn local_identity_dir() -> Result<std::path::PathBuf, JanusError> {
-    Ok(home_dir()?.join(".config").join("janus").join("identities"))
-}
-
-fn local_identity_path(name: &str) -> Result<std::path::PathBuf, JanusError> {
-    Ok(local_identity_dir()?.join(format!("{name}.key")))
-}
-
-#[cfg(unix)]
-fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), JanusError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(data)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), JanusError> {
-    fs::write(path, data)?;
-    Ok(())
-}
-
-fn save_local_identity(name: &str, key_data: &[u8]) -> Result<(), JanusError> {
-    let id_dir = local_identity_dir()?;
-    fs::create_dir_all(&id_dir)?;
-    write_secret_file(&local_identity_path(name)?, key_data)
 }
 
 fn epoch_secs() -> u64 {
@@ -132,11 +102,60 @@ fn write_group_atomically(
     Ok(())
 }
 
+/// Resolves a group's secret key: tries the keystore first, falls back to
+/// decrypting the bundle with the SSH identity, caching the result.
+fn resolve_group_key(
+    group_name: &str,
+    ctx: &GroupContext,
+) -> Result<age::x25519::Identity, JanusError> {
+    // Try keystore cache first
+    match ctx.keystore.load(group_name) {
+        Ok(Some(key_data)) => return parse_group_identity(&key_data),
+        Ok(None) => {} // Not cached, fall through to bundle
+        Err(JanusError::Keychain { ref kind, .. })
+            if *kind == crate::error::KeychainErrorKind::AuthenticationDenied =>
+        {
+            eprintln!("warning: keychain authentication denied, falling back to bundle");
+        }
+        Err(JanusError::Keychain { ref kind, .. })
+            if *kind == crate::error::KeychainErrorKind::MissingEntitlement =>
+        {
+            eprintln!(
+                "warning: code signing required for keychain access; \
+                 see README for setup. Falling back to bundle"
+            );
+        }
+        Err(e) => return Err(e),
+    }
+
+    // Fallback: decrypt from bundle
+    let bundle_path = groups_dir(&ctx.repo_root, group_name).join(BUNDLE_FILE);
+    let ciphertext = fs::read(&bundle_path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => JanusError::GroupKeyNotImported(group_name.to_string()),
+        _ => e.into(),
+    })?;
+    let key_data = crate::decrypt::decrypt(&ctx.identity_path, &ciphertext)?;
+
+    // Cache for next time (no-op for NullStore)
+    if let Err(e) = ctx.keystore.save(group_name, &key_data) {
+        eprintln!("warning: failed to cache group key ({e})");
+    }
+
+    parse_group_identity(&key_data)
+}
+
+fn parse_group_identity(key_data: &[u8]) -> Result<age::x25519::Identity, JanusError> {
+    let s = std::str::from_utf8(key_data).map_err(|e| JanusError::Decrypt(e.to_string()))?;
+    s.trim()
+        .parse()
+        .map_err(|e: &str| JanusError::Decrypt(e.to_string()))
+}
+
 fn generate_and_distribute_key(
     name: &str,
     members: Vec<String>,
     recipients: &[age::ssh::Recipient],
-    repo_root: &Path,
+    ctx: &GroupContext,
 ) -> Result<Group, JanusError> {
     let identity = age::x25519::Identity::generate();
     let public_key = identity.to_public().to_string();
@@ -152,11 +171,11 @@ fn generate_and_distribute_key(
         created_at: Some(epoch_secs()),
     };
 
-    write_group_atomically(name, &group, &bundle, repo_root)?;
+    write_group_atomically(name, &group, &bundle, &ctx.repo_root)?;
 
-    if let Err(e) = save_local_identity(name, secret_key_str.as_bytes()) {
+    if let Err(e) = ctx.keystore.save(name, secret_key_str.as_bytes()) {
         eprintln!(
-            "warning: group created but local key save failed ({e}); \
+            "warning: group created but key cache failed ({e}); \
              run `janus group import {name}` to recover"
         );
     }
@@ -165,11 +184,11 @@ fn generate_and_distribute_key(
 }
 
 /// Creates a new group with a shared key, encrypting it for all members' GitHub SSH keys.
-pub fn create(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
+pub fn create(name: &str, members: &[String], ctx: &GroupContext) -> Result<Group, JanusError> {
     validate_group_name(name)?;
     let members = dedup_members(members);
     let recipients = crate::github::fetch_all_recipients(&members)?;
-    generate_and_distribute_key(name, members, &recipients, repo_root)
+    generate_and_distribute_key(name, members, &recipients, ctx)
 }
 
 /// Creates a new group with pre-fetched SSH recipients, bypassing GitHub API calls.
@@ -177,23 +196,23 @@ pub fn create_with_recipients(
     name: &str,
     members: &[String],
     recipients: &[age::ssh::Recipient],
-    repo_root: &Path,
+    ctx: &GroupContext,
 ) -> Result<Group, JanusError> {
     validate_group_name(name)?;
     let members = dedup_members(members);
-    generate_and_distribute_key(name, members, recipients, repo_root)
+    generate_and_distribute_key(name, members, recipients, ctx)
 }
 
-/// Imports a group's shared key by decrypting the bundle with the user's SSH private key.
-pub fn import(name: &str, identity_path: &Path, repo_root: &Path) -> Result<(), JanusError> {
+/// Imports a group's shared key by decrypting the bundle and storing it in the keystore.
+pub fn import(name: &str, ctx: &GroupContext) -> Result<(), JanusError> {
     validate_group_name(name)?;
-    let bundle_path = groups_dir(repo_root, name).join(BUNDLE_FILE);
+    let bundle_path = groups_dir(&ctx.repo_root, name).join(BUNDLE_FILE);
     let ciphertext = fs::read(&bundle_path).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => JanusError::GroupNotFound(name.to_string()),
         _ => e.into(),
     })?;
-    let secret_key_bytes = crate::decrypt::decrypt(identity_path, &ciphertext)?;
-    save_local_identity(name, &secret_key_bytes)
+    let secret_key_bytes = crate::decrypt::decrypt(&ctx.identity_path, &ciphertext)?;
+    ctx.keystore.save(name, &secret_key_bytes)
 }
 
 /// Loads group metadata from the repository.
@@ -242,15 +261,15 @@ pub fn list(repo_root: &Path) -> Result<Vec<Group>, JanusError> {
 }
 
 /// Rotates the group key with a new member list, generating a fresh keypair.
-pub fn rotate(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
+pub fn rotate(name: &str, members: &[String], ctx: &GroupContext) -> Result<Group, JanusError> {
     validate_group_name(name)?;
-    let meta_path = groups_dir(repo_root, name).join(META_FILE);
+    let meta_path = groups_dir(&ctx.repo_root, name).join(META_FILE);
     if fs::metadata(&meta_path).is_err() {
         return Err(JanusError::GroupNotFound(name.to_string()));
     }
     let members = dedup_members(members);
     let recipients = crate::github::fetch_all_recipients(&members)?;
-    generate_and_distribute_key(name, members, &recipients, repo_root)
+    generate_and_distribute_key(name, members, &recipients, ctx)
 }
 
 /// Encrypts plaintext using a group's public key.
@@ -265,21 +284,13 @@ pub fn encrypt_for_group(group: &Group, plaintext: &[u8]) -> Result<Vec<u8>, Jan
     )
 }
 
-/// Decrypts ciphertext using a group's locally stored private key.
-pub fn decrypt_with_group(group_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>, JanusError> {
+/// Decrypts ciphertext using a group's secret key resolved via the keystore or bundle fallback.
+pub fn decrypt_with_group(
+    group_name: &str,
+    ciphertext: &[u8],
+    ctx: &GroupContext,
+) -> Result<Vec<u8>, JanusError> {
     validate_group_name(group_name)?;
-    let key_path = local_identity_path(group_name)?;
-    let secret_key_str = fs::read_to_string(&key_path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => JanusError::GroupKeyNotImported(group_name.to_string()),
-        _ => JanusError::IdentityRead {
-            path: key_path.clone(),
-            source: e,
-        },
-    })?;
-    let identity: age::x25519::Identity = secret_key_str
-        .trim()
-        .parse()
-        .map_err(|e: &str| JanusError::Decrypt(e.to_string()))?;
-
+    let identity = resolve_group_key(group_name, ctx)?;
     crate::decrypt::decrypt_with_identity(&identity, ciphertext)
 }

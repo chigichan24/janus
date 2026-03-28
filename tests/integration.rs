@@ -22,6 +22,17 @@ fn generate_ssh_keypair(dir: &std::path::Path) -> (std::path::PathBuf, age::ssh:
     (key_path, recipient)
 }
 
+fn make_test_context(
+    dir: &std::path::Path,
+    identity_path: std::path::PathBuf,
+) -> janus::GroupContext {
+    janus::GroupContext {
+        repo_root: dir.to_path_buf(),
+        identity_path,
+        keystore: Box::new(janus::keystore::MemoryStore::new()),
+    }
+}
+
 #[test]
 fn encrypt_decrypt_round_trip_with_ssh_key() {
     let dir = TempDir::new().expect("tempdir");
@@ -59,23 +70,19 @@ fn encrypt_armor_decrypt_round_trip() {
 #[test]
 fn group_create_and_encrypt_decrypt_round_trip() {
     let dir = TempDir::new().expect("tempdir");
-    let repo_root = dir.path();
     let (key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
+    let ctx = make_test_context(dir.path(), key_path);
 
-    let group = janus::group::create_with_recipients(
-        "test-team",
-        &["testuser".into()],
-        &[recipient],
-        repo_root,
-    )
-    .expect("create");
+    let group =
+        janus::group::create_with_recipients("test-team", &["testuser".into()], &[recipient], &ctx)
+            .expect("create");
 
-    janus::group::import("test-team", &key_path, repo_root).expect("import");
+    janus::group::import("test-team", &ctx).expect("import");
 
     let ciphertext =
         janus::encrypt_for_group(&group, b"secret group message").expect("encrypt for group");
     let plaintext =
-        janus::decrypt_with_group("test-team", &ciphertext).expect("decrypt with group");
+        janus::decrypt_with_group("test-team", &ciphertext, &ctx).expect("decrypt with group");
 
     assert_eq!(plaintext, b"secret group message");
 }
@@ -89,10 +96,27 @@ fn group_load_not_found() {
 }
 
 #[test]
-fn decrypt_with_group_not_imported() {
-    let result = janus::decrypt_with_group("nonexistent-group-xyz", b"dummy");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not imported"));
+fn decrypt_with_group_not_imported_uses_bundle_fallback() {
+    let dir = TempDir::new().expect("tempdir");
+    let (key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
+    let ctx = make_test_context(dir.path(), key_path);
+
+    let group = janus::group::create_with_recipients(
+        "fallback-test",
+        &["testuser".into()],
+        &[recipient],
+        &ctx,
+    )
+    .expect("create");
+
+    // Use a fresh MemoryStore (empty cache) to force bundle fallback
+    let fresh_ctx = make_test_context(dir.path(), ctx.identity_path.clone());
+
+    let ciphertext = janus::encrypt_for_group(&group, b"fallback msg").expect("encrypt");
+    let plaintext =
+        janus::decrypt_with_group("fallback-test", &ciphertext, &fresh_ctx).expect("decrypt");
+
+    assert_eq!(plaintext, b"fallback msg");
 }
 
 #[test]
@@ -128,13 +152,14 @@ fn group_list_empty() {
 #[test]
 fn group_members_deduplication() {
     let dir = TempDir::new().expect("tempdir");
-    let (_key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
+    let (key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
+    let ctx = make_test_context(dir.path(), key_path);
 
     let group = janus::group::create_with_recipients(
         "dedup-test",
         &["alice".into(), "alice".into(), "bob".into()],
         &[recipient],
-        dir.path(),
+        &ctx,
     )
     .expect("create");
 

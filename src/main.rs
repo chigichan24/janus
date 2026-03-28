@@ -94,8 +94,14 @@ fn resolve_identity(identity: Option<PathBuf>) -> Result<PathBuf, janus::JanusEr
     }
 }
 
-fn repo_root() -> Result<PathBuf, janus::JanusError> {
-    std::env::current_dir().map_err(janus::JanusError::from)
+fn build_group_context(
+    identity: Option<PathBuf>,
+) -> Result<janus::GroupContext, janus::JanusError> {
+    Ok(janus::GroupContext {
+        repo_root: std::env::current_dir()?,
+        identity_path: resolve_identity(identity)?,
+        keystore: janus::default_keystore(),
+    })
 }
 
 fn cmd_encrypt(
@@ -108,7 +114,8 @@ fn cmd_encrypt(
     let plaintext = read_plaintext(message)?;
 
     let ciphertext: Vec<u8> = if let Some(group_name) = group {
-        let group = janus::group::load(&group_name, &repo_root()?)?;
+        let repo_root = std::env::current_dir()?;
+        let group = janus::group::load(&group_name, &repo_root)?;
         janus::encrypt_for_group(&group, &plaintext)?
     } else {
         let ssh_recipients = janus::github::fetch_all_recipients(&recipients)?;
@@ -131,7 +138,8 @@ fn cmd_decrypt(
     let ciphertext = read_input(input)?;
 
     let plaintext = if let Some(group_name) = group {
-        janus::decrypt_with_group(&group_name, &ciphertext)?
+        let ctx = build_group_context(identity)?;
+        janus::decrypt_with_group(&group_name, &ciphertext, &ctx)?
     } else {
         janus::decrypt(&resolve_identity(identity)?, &ciphertext)?
     };
@@ -185,19 +193,22 @@ fn print_group_result(group: &janus::Group, action: GroupAction) {
 }
 
 fn cmd_group_create(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
-    let group = janus::group::create(name, members, &repo_root()?)?;
+    let ctx = build_group_context(None)?;
+    let group = janus::group::create(name, members, &ctx)?;
     print_group_result(&group, GroupAction::Created);
     Ok(())
 }
 
 fn cmd_group_import(name: &str, identity: Option<PathBuf>) -> Result<(), janus::JanusError> {
-    janus::group::import(name, &resolve_identity(identity)?, &repo_root()?)?;
+    let ctx = build_group_context(identity)?;
+    janus::group::import(name, &ctx)?;
     eprintln!("imported group key for '{name}'");
     Ok(())
 }
 
 fn cmd_group_list() -> Result<(), janus::JanusError> {
-    let groups = janus::group::list(&repo_root()?)?;
+    let repo_root = std::env::current_dir()?;
+    let groups = janus::group::list(&repo_root)?;
     if groups.is_empty() {
         eprintln!("no groups found");
         return Ok(());
@@ -214,7 +225,8 @@ fn cmd_group_list() -> Result<(), janus::JanusError> {
 }
 
 fn cmd_group_show(name: &str) -> Result<(), janus::JanusError> {
-    let group = janus::group::load(name, &repo_root()?)?;
+    let repo_root = std::env::current_dir()?;
+    let group = janus::group::load(name, &repo_root)?;
     println!("name: {}", group.name);
     println!("public_key: {}", group.public_key);
     println!("members: {}", group.members.join(", "));
@@ -225,7 +237,8 @@ fn cmd_group_show(name: &str) -> Result<(), janus::JanusError> {
 }
 
 fn cmd_group_rotate(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
-    let group = janus::group::rotate(name, members, &repo_root()?)?;
+    let ctx = build_group_context(None)?;
+    let group = janus::group::rotate(name, members, &ctx)?;
     print_group_result(&group, GroupAction::Rotated);
     Ok(())
 }
