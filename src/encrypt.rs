@@ -27,7 +27,6 @@ fn encrypt_to_writer<W: Write>(
         .map_err(|e| JanusError::Encrypt(e.to_string()))
 }
 
-/// Encrypts plaintext for an arbitrary set of age recipients.
 pub fn encrypt_for_recipients<'a>(
     recipients: impl Iterator<Item = &'a dyn age::Recipient>,
     plaintext: &[u8],
@@ -38,7 +37,6 @@ pub fn encrypt_for_recipients<'a>(
     Ok(ciphertext)
 }
 
-/// Encrypts plaintext to multiple SSH recipients in age binary format.
 pub fn encrypt(
     recipients: &[age::ssh::Recipient],
     plaintext: &[u8],
@@ -49,7 +47,6 @@ pub fn encrypt(
     )
 }
 
-/// Encrypts plaintext to multiple SSH recipients in age ASCII-armored format.
 pub fn encrypt_armor(
     recipients: &[age::ssh::Recipient],
     plaintext: &[u8],

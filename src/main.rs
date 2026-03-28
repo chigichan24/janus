@@ -87,8 +87,11 @@ fn expand_tilde(path: &Path) -> Result<PathBuf, janus::JanusError> {
     Ok(path.to_path_buf())
 }
 
-fn default_identity() -> Result<PathBuf, janus::JanusError> {
-    expand_tilde(Path::new("~/.ssh/id_ed25519"))
+fn resolve_identity(identity: Option<PathBuf>) -> Result<PathBuf, janus::JanusError> {
+    match identity {
+        Some(p) => expand_tilde(&p),
+        None => expand_tilde(Path::new("~/.ssh/id_ed25519")),
+    }
 }
 
 fn repo_root() -> Result<PathBuf, janus::JanusError> {
@@ -130,11 +133,7 @@ fn cmd_decrypt(
     let plaintext = if let Some(group_name) = group {
         janus::decrypt_with_group(&group_name, &ciphertext)?
     } else {
-        let id_path = match identity {
-            Some(p) => expand_tilde(&p)?,
-            None => default_identity()?,
-        };
-        janus::decrypt(&id_path, &ciphertext)?
+        janus::decrypt(&resolve_identity(identity)?, &ciphertext)?
     };
 
     write_output(output, &plaintext)
@@ -192,11 +191,7 @@ fn cmd_group_create(name: &str, members: &[String]) -> Result<(), janus::JanusEr
 }
 
 fn cmd_group_import(name: &str, identity: Option<PathBuf>) -> Result<(), janus::JanusError> {
-    let id_path = match identity {
-        Some(p) => expand_tilde(&p)?,
-        None => default_identity()?,
-    };
-    janus::group::import(name, &id_path, &repo_root()?)?;
+    janus::group::import(name, &resolve_identity(identity)?, &repo_root()?)?;
     eprintln!("imported group key for '{name}'");
     Ok(())
 }

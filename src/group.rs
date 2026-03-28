@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::JanusError;
 
+const JANUS_DIR: &str = ".janus";
+const GROUPS_DIR: &str = "groups";
+const META_FILE: &str = "meta.toml";
+const BUNDLE_FILE: &str = "bundle.age";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Group {
     pub name: String,
@@ -39,7 +44,7 @@ fn dedup_members(members: &[String]) -> Vec<String> {
 }
 
 fn groups_dir(repo_root: &Path, name: &str) -> std::path::PathBuf {
-    repo_root.join(".janus").join("groups").join(name)
+    repo_root.join(JANUS_DIR).join(GROUPS_DIR).join(name)
 }
 
 fn home_dir() -> Result<std::path::PathBuf, JanusError> {
@@ -104,10 +109,10 @@ fn write_group_atomically(
     fs::create_dir_all(&tmp_dir)?;
 
     fs::write(
-        tmp_dir.join("meta.toml"),
+        tmp_dir.join(META_FILE),
         toml::to_string_pretty(group).map_err(|e| JanusError::Config(e.to_string()))?,
     )?;
-    fs::write(tmp_dir.join("bundle.age"), bundle)?;
+    fs::write(tmp_dir.join(BUNDLE_FILE), bundle)?;
 
     if dir.exists() {
         fs::rename(&dir, &backup_dir)?;
@@ -179,29 +184,23 @@ pub fn create_with_recipients(
 
 pub fn import(name: &str, identity_path: &Path, repo_root: &Path) -> Result<(), JanusError> {
     validate_group_name(name)?;
-    let bundle_path = groups_dir(repo_root, name).join("bundle.age");
-    if !bundle_path.exists() {
-        return Err(JanusError::GroupNotFound(name.to_string()));
-    }
-
-    let ciphertext = fs::read(&bundle_path)?;
+    let bundle_path = groups_dir(repo_root, name).join(BUNDLE_FILE);
+    let ciphertext = fs::read(&bundle_path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => JanusError::GroupNotFound(name.to_string()),
+        _ => e.into(),
+    })?;
     let secret_key_bytes = crate::decrypt::decrypt(identity_path, &ciphertext)?;
-
-    let id_dir = local_identity_dir()?;
-    fs::create_dir_all(&id_dir)?;
-    write_secret_file(&local_identity_path(name)?, &secret_key_bytes)?;
-
-    Ok(())
+    save_local_identity(name, &secret_key_bytes)
 }
 
 pub fn load(name: &str, repo_root: &Path) -> Result<Group, JanusError> {
     validate_group_name(name)?;
-    let meta_path = groups_dir(repo_root, name).join("meta.toml");
-    if !meta_path.exists() {
-        return Err(JanusError::GroupNotFound(name.to_string()));
-    }
+    let meta_path = groups_dir(repo_root, name).join(META_FILE);
+    let content = fs::read_to_string(&meta_path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => JanusError::GroupNotFound(name.to_string()),
+        _ => e.into(),
+    })?;
 
-    let content = fs::read_to_string(&meta_path)?;
     let mut group =
         toml::from_str::<Group>(&content).map_err(|e| JanusError::Config(e.to_string()))?;
 
@@ -217,14 +216,16 @@ pub fn load(name: &str, repo_root: &Path) -> Result<Group, JanusError> {
 }
 
 pub fn list(repo_root: &Path) -> Result<Vec<Group>, JanusError> {
-    let groups_path = repo_root.join(".janus").join("groups");
-    if !groups_path.exists() {
-        return Ok(vec![]);
-    }
+    let groups_path = repo_root.join(JANUS_DIR).join(GROUPS_DIR);
+    let entries = match fs::read_dir(&groups_path) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.into()),
+    };
     let mut groups = Vec::new();
-    for entry in fs::read_dir(&groups_path)? {
+    for entry in entries {
         let entry = entry?;
-        if entry.file_type()?.is_dir() && entry.path().join("meta.toml").exists() {
+        if entry.file_type()?.is_dir() && entry.path().join(META_FILE).exists() {
             let name = entry.file_name().to_string_lossy().to_string();
             match load(&name, repo_root) {
                 Ok(group) => groups.push(group),
@@ -237,8 +238,8 @@ pub fn list(repo_root: &Path) -> Result<Vec<Group>, JanusError> {
 
 pub fn rotate(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
     validate_group_name(name)?;
-    let dir = groups_dir(repo_root, name);
-    if !dir.join("meta.toml").exists() {
+    let meta_path = groups_dir(repo_root, name).join(META_FILE);
+    if fs::metadata(&meta_path).is_err() {
         return Err(JanusError::GroupNotFound(name.to_string()));
     }
     let members = dedup_members(members);
@@ -260,13 +261,12 @@ pub fn encrypt_for_group(group: &Group, plaintext: &[u8]) -> Result<Vec<u8>, Jan
 pub fn decrypt_with_group(group_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>, JanusError> {
     validate_group_name(group_name)?;
     let key_path = local_identity_path(group_name)?;
-    if !key_path.exists() {
-        return Err(JanusError::GroupKeyNotImported(group_name.to_string()));
-    }
-
-    let secret_key_str = fs::read_to_string(&key_path).map_err(|e| JanusError::IdentityRead {
-        path: key_path.clone(),
-        source: e,
+    let secret_key_str = fs::read_to_string(&key_path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => JanusError::GroupKeyNotImported(group_name.to_string()),
+        _ => JanusError::IdentityRead {
+            path: key_path.clone(),
+            source: e,
+        },
     })?;
     let identity: age::x25519::Identity = secret_key_str
         .trim()
