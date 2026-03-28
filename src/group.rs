@@ -18,12 +18,13 @@ pub struct Group {
 
 fn validate_group_name(name: &str) -> Result<(), JanusError> {
     if name.is_empty()
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains("..")
-        || name.contains('\0')
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
-        return Err(JanusError::Config(format!("invalid group name: {name}")));
+        return Err(JanusError::Config(format!(
+            "invalid group name: '{name}' (only ASCII alphanumeric, '-', and '_' are allowed)"
+        )));
     }
     Ok(())
 }
@@ -87,6 +88,8 @@ fn write_group_atomically(
 ) -> Result<(), JanusError> {
     let dir = groups_dir(repo_root, name);
     let tmp_dir = dir.with_extension("tmp");
+    let backup_dir = dir.with_extension("bak");
+
     if tmp_dir.exists() {
         fs::remove_dir_all(&tmp_dir)?;
     }
@@ -99,9 +102,17 @@ fn write_group_atomically(
     fs::write(tmp_dir.join("bundle.age"), bundle)?;
 
     if dir.exists() {
-        fs::remove_dir_all(&dir)?;
+        fs::rename(&dir, &backup_dir)?;
     }
-    fs::rename(&tmp_dir, &dir)?;
+    if let Err(e) = fs::rename(&tmp_dir, &dir) {
+        if backup_dir.exists() {
+            let _ = fs::rename(&backup_dir, &dir);
+        }
+        return Err(e.into());
+    }
+    if backup_dir.exists() {
+        let _ = fs::remove_dir_all(&backup_dir);
+    }
 
     Ok(())
 }
@@ -130,7 +141,13 @@ fn generate_and_distribute_key(
 
     let id_dir = local_identity_dir()?;
     fs::create_dir_all(&id_dir)?;
-    write_secret_file(&local_identity_path(name)?, secret_key_str.as_bytes())?;
+    if let Err(e) = write_secret_file(&local_identity_path(name)?, secret_key_str.as_bytes()) {
+        eprintln!(
+            "warning: group created but local key save failed; \
+             run `janus group import {name}` to recover"
+        );
+        return Err(e);
+    }
 
     Ok(group)
 }

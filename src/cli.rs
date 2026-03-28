@@ -33,7 +33,7 @@ pub enum Command {
         output: Option<PathBuf>,
 
         /// Use ASCII armor (text-safe output)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "group")]
         armor: bool,
     },
 

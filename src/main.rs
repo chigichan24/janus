@@ -152,6 +152,20 @@ impl GroupAction {
             Self::Rotated => "rotated",
         }
     }
+
+    fn public_key_label(&self) -> &'static str {
+        match self {
+            Self::Created => "public key",
+            Self::Rotated => "new public key",
+        }
+    }
+
+    fn follow_up(&self, name: &str) -> String {
+        match self {
+            Self::Created => format!("members can then run: janus group import {name}"),
+            Self::Rotated => format!("all members must re-import: janus group import {name}"),
+        }
+    }
 }
 
 fn print_group_result(group: &janus::Group, action: GroupAction) {
@@ -161,24 +175,14 @@ fn print_group_result(group: &janus::Group, action: GroupAction) {
         "{label} group '{name}' with {} members",
         group.members.len()
     );
-    match action {
-        GroupAction::Rotated => eprintln!("new public key: {}", group.public_key),
-        GroupAction::Created => eprintln!("public key: {}", group.public_key),
-    }
+    eprintln!("{}: {}", action.public_key_label(), group.public_key);
     eprintln!();
     eprintln!("next steps:");
     eprintln!("  git add .janus/groups/{name}/");
     eprintln!("  git commit -m \"{label} group {name}\"");
     eprintln!("  git push");
     eprintln!();
-    match action {
-        GroupAction::Rotated => {
-            eprintln!("all members must re-import: janus group import {name}");
-        }
-        GroupAction::Created => {
-            eprintln!("members can then run: janus group import {name}");
-        }
-    }
+    eprintln!("{}", action.follow_up(name));
 }
 
 fn cmd_group_create(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
