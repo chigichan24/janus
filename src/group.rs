@@ -32,7 +32,30 @@ fn local_identity_path(name: &str) -> Result<std::path::PathBuf, JanusError> {
     Ok(local_identity_dir()?.join(format!("{name}.key")))
 }
 
-pub fn create(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
+#[cfg(unix)]
+fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), JanusError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(data)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), JanusError> {
+    fs::write(path, data)?;
+    Ok(())
+}
+
+fn generate_and_distribute_key(
+    name: &str,
+    members: &[String],
+    repo_root: &Path,
+) -> Result<Group, JanusError> {
     let identity = age::x25519::Identity::generate();
     let public_key = identity.to_public().to_string();
     let secret_key = identity.to_string();
@@ -63,9 +86,13 @@ pub fn create(name: &str, members: &[String], repo_root: &Path) -> Result<Group,
 
     let id_dir = local_identity_dir()?;
     fs::create_dir_all(&id_dir)?;
-    fs::write(local_identity_path(name)?, secret_key_str.as_bytes())?;
+    write_secret_file(&local_identity_path(name)?, secret_key_str.as_bytes())?;
 
     Ok(group)
+}
+
+pub fn create(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
+    generate_and_distribute_key(name, members, repo_root)
 }
 
 pub fn import(name: &str, identity_path: &Path, repo_root: &Path) -> Result<(), JanusError> {
@@ -79,7 +106,7 @@ pub fn import(name: &str, identity_path: &Path, repo_root: &Path) -> Result<(), 
 
     let id_dir = local_identity_dir()?;
     fs::create_dir_all(&id_dir)?;
-    fs::write(local_identity_path(name)?, &secret_key_bytes)?;
+    write_secret_file(&local_identity_path(name)?, &secret_key_bytes)?;
 
     Ok(())
 }
@@ -99,38 +126,7 @@ pub fn rotate(name: &str, members: &[String], repo_root: &Path) -> Result<Group,
     if !dir.join("meta.toml").exists() {
         return Err(JanusError::GroupNotFound(name.to_string()));
     }
-
-    let identity = age::x25519::Identity::generate();
-    let public_key = identity.to_public().to_string();
-    let secret_key = identity.to_string();
-    let secret_key_str = secret_key.expose_secret();
-
-    let recipients = crate::github::fetch_all_recipients(members)?;
-    let bundle = crate::encrypt::encrypt(&recipients, secret_key_str.as_bytes())?;
-
-    let epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let group = Group {
-        name: name.to_string(),
-        members: members.to_vec(),
-        public_key,
-        created_at: epoch.to_string(),
-    };
-
-    fs::write(
-        dir.join("meta.toml"),
-        toml::to_string_pretty(&group).map_err(|e| JanusError::Config(e.to_string()))?,
-    )?;
-    fs::write(dir.join("bundle.age"), &bundle)?;
-
-    let id_dir = local_identity_dir()?;
-    fs::create_dir_all(&id_dir)?;
-    fs::write(local_identity_path(name)?, secret_key_str.as_bytes())?;
-
-    Ok(group)
+    generate_and_distribute_key(name, members, repo_root)
 }
 
 pub fn encrypt_for_group(group: &Group, plaintext: &[u8]) -> Result<Vec<u8>, JanusError> {
@@ -138,23 +134,10 @@ pub fn encrypt_for_group(group: &Group, plaintext: &[u8]) -> Result<Vec<u8>, Jan
         .public_key
         .parse()
         .map_err(|e: &str| JanusError::Encrypt(e.to_string()))?;
-
-    let encryptor =
-        age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
-            .map_err(|e| JanusError::Encrypt(e.to_string()))?;
-
-    let mut ciphertext = Vec::with_capacity(plaintext.len());
-    let mut writer = encryptor
-        .wrap_output(&mut ciphertext)
-        .map_err(|e| JanusError::Encrypt(e.to_string()))?;
-    writer
-        .write_all(plaintext)
-        .map_err(|e| JanusError::Encrypt(e.to_string()))?;
-    writer
-        .finish()
-        .map_err(|e| JanusError::Encrypt(e.to_string()))?;
-
-    Ok(ciphertext)
+    crate::encrypt::encrypt_for_recipients(
+        std::iter::once(&recipient as &dyn age::Recipient),
+        plaintext,
+    )
 }
 
 pub fn decrypt_with_group(group_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>, JanusError> {
@@ -170,8 +153,9 @@ pub fn decrypt_with_group(group_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>
         .parse()
         .map_err(|e: &str| JanusError::Decrypt(e.to_string()))?;
 
-    let decryptor =
-        age::Decryptor::new_buffered(ciphertext).map_err(|e| JanusError::Decrypt(e.to_string()))?;
+    let armored_reader = age::armor::ArmoredReader::new(ciphertext);
+    let decryptor = age::Decryptor::new_buffered(armored_reader)
+        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
 
     let mut reader = decryptor
         .decrypt(std::iter::once(&identity as &dyn age::Identity))

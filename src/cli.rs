@@ -18,11 +18,11 @@ pub enum Command {
     /// Encrypt a message for GitHub users or a group
     Encrypt {
         /// GitHub usernames to encrypt for
-        #[arg(short = 't', long = "to")]
+        #[arg(short = 't', long = "to", required_unless_present = "group")]
         recipients: Vec<String>,
 
         /// Group name to encrypt for
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "recipients")]
         group: Option<String>,
 
         /// Message to encrypt (reads from stdin if not provided)

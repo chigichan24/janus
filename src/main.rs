@@ -103,22 +103,16 @@ fn cmd_encrypt(
 ) -> Result<(), janus::JanusError> {
     let plaintext = read_plaintext(message)?;
 
-    let ciphertext = if let Some(group_name) = group {
+    let ciphertext: Vec<u8> = if let Some(group_name) = group {
         let group = janus::group::load(&group_name, &repo_root()?)?;
         janus::encrypt_for_group(&group, &plaintext)?
-    } else if !recipients.is_empty() {
+    } else {
         let ssh_recipients = janus::github::fetch_all_recipients(&recipients)?;
         if armor {
-            return write_output(
-                output,
-                janus::encrypt_armor(&ssh_recipients, &plaintext)?.as_bytes(),
-            );
+            janus::encrypt_armor(&ssh_recipients, &plaintext)?.into_bytes()
+        } else {
+            janus::encrypt(&ssh_recipients, &plaintext)?
         }
-        janus::encrypt(&ssh_recipients, &plaintext)?
-    } else {
-        return Err(janus::JanusError::Config(
-            "specify --to <user> or --group <name>".into(),
-        ));
     };
 
     write_output(output, &ciphertext)
@@ -185,13 +179,18 @@ fn cmd_group_list() -> Result<(), janus::JanusError> {
             let meta_path = entry.path().join("meta.toml");
             if meta_path.exists() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if let Ok(group) = janus::group::load(&name, &root) {
-                    println!(
-                        "{} ({} members: {})",
-                        group.name,
-                        group.members.len(),
-                        group.members.join(", ")
-                    );
+                match janus::group::load(&name, &root) {
+                    Ok(group) => {
+                        println!(
+                            "{} ({} members: {})",
+                            group.name,
+                            group.members.len(),
+                            group.members.join(", ")
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("warning: failed to load group '{name}': {e}");
+                    }
                 }
             }
         }

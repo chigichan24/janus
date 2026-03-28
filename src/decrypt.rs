@@ -13,12 +13,8 @@ pub fn decrypt(identity_path: &Path, ciphertext: &[u8]) -> Result<Vec<u8>, Janus
     let reader = BufReader::new(file);
 
     let filename = identity_path.to_string_lossy().into_owned();
-    let identity = age::ssh::Identity::from_buffer(reader, Some(filename)).map_err(|e| {
-        JanusError::IdentityRead {
-            path: identity_path.to_path_buf(),
-            source: e,
-        }
-    })?;
+    let identity = age::ssh::Identity::from_buffer(reader, Some(filename))
+        .map_err(|e| JanusError::KeyParse(e.to_string()))?;
 
     match &identity {
         age::ssh::Identity::Encrypted(_) => {
@@ -34,8 +30,9 @@ pub fn decrypt(identity_path: &Path, ciphertext: &[u8]) -> Result<Vec<u8>, Janus
         age::ssh::Identity::Unencrypted(_) => {}
     }
 
-    let decryptor =
-        age::Decryptor::new_buffered(ciphertext).map_err(|e| JanusError::Decrypt(e.to_string()))?;
+    let armored_reader = age::armor::ArmoredReader::new(ciphertext);
+    let decryptor = age::Decryptor::new_buffered(armored_reader)
+        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
 
     let mut reader = decryptor
         .decrypt(std::iter::once(&identity as &dyn age::Identity))
