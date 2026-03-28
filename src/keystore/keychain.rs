@@ -1,16 +1,17 @@
 use security_framework::passwords::{
     AccessControlOptions, PasswordOptions, delete_generic_password, generic_password,
-    set_generic_password_options,
+    set_generic_password, set_generic_password_options,
 };
-// errSecItemNotFound = -25300
-const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
 use crate::error::{JanusError, KeychainErrorKind};
 use crate::keystore::KeyStore;
 
 const SERVICE: &str = "com.janus.group-key";
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+const ERR_SEC_MISSING_ENTITLEMENT: i32 = -34018;
 
-/// macOS Keychain-backed key store with Touch ID / passcode protection.
+/// macOS Keychain-backed key store.
+/// Attempts Touch ID protection first; falls back to basic Keychain if unsigned.
 pub struct KeychainStore;
 
 fn map_keychain_error(err: security_framework::base::Error) -> JanusError {
@@ -29,10 +30,9 @@ fn map_keychain_error(err: security_framework::base::Error) -> JanusError {
             kind: KeychainErrorKind::AccessDenied,
         };
     }
-    // errSecMissingEntitlement = -34018
-    if code == -34018 {
+    if code == ERR_SEC_MISSING_ENTITLEMENT {
         return JanusError::Keychain {
-            message: "missing code signing entitlement; see README for setup".into(),
+            message: "missing code signing entitlement".into(),
             kind: KeychainErrorKind::MissingEntitlement,
         };
     }
@@ -43,22 +43,39 @@ fn map_keychain_error(err: security_framework::base::Error) -> JanusError {
 }
 
 impl KeyStore for KeychainStore {
-    /// Stores a group key in macOS Keychain with biometric/passcode access control.
+    /// Stores a group key in macOS Keychain.
+    /// Tries Touch ID protection first, falls back to basic Keychain.
     fn save(&self, group_name: &str, key_data: &[u8]) -> Result<(), JanusError> {
-        // Delete any existing entry first (set_generic_password_options handles
-        // duplicates, but we want to ensure access control is applied fresh)
         let _ = delete_generic_password(SERVICE, group_name);
 
+        // Try with Touch ID first
         let mut options = PasswordOptions::new_generic_password(SERVICE, group_name);
         options.set_access_control_options(AccessControlOptions::USER_PRESENCE);
-        set_generic_password_options(key_data, options).map_err(map_keychain_error)
+        match set_generic_password_options(key_data, options) {
+            Ok(()) => return Ok(()),
+            Err(err) if err.code() == ERR_SEC_MISSING_ENTITLEMENT => {
+                // No code signing — fall back to basic Keychain (no Touch ID)
+            }
+            Err(err) => return Err(map_keychain_error(err)),
+        }
+
+        set_generic_password(SERVICE, group_name, key_data).map_err(map_keychain_error)
     }
 
-    /// Retrieves a group key from macOS Keychain. Triggers Touch ID / passcode prompt.
+    /// Retrieves a group key from macOS Keychain.
     fn load(&self, group_name: &str) -> Result<Option<Vec<u8>>, JanusError> {
+        // Try with Touch ID access control first
         let mut options = PasswordOptions::new_generic_password(SERVICE, group_name);
         options.set_access_control_options(AccessControlOptions::USER_PRESENCE);
         match generic_password(options) {
+            Ok(data) => return Ok(Some(data)),
+            Err(err) if err.code() == ERR_SEC_ITEM_NOT_FOUND => {}
+            Err(err) if err.code() == ERR_SEC_MISSING_ENTITLEMENT => {}
+            Err(err) => return Err(map_keychain_error(err)),
+        }
+
+        // Fall back to basic Keychain (item may have been saved without Touch ID)
+        match security_framework::passwords::get_generic_password(SERVICE, group_name) {
             Ok(data) => Ok(Some(data)),
             Err(err) if err.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
             Err(err) => Err(map_keychain_error(err)),
