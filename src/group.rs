@@ -79,6 +79,33 @@ fn epoch_secs() -> u64 {
         .as_secs()
 }
 
+fn write_group_atomically(
+    name: &str,
+    group: &Group,
+    bundle: &[u8],
+    repo_root: &Path,
+) -> Result<(), JanusError> {
+    let dir = groups_dir(repo_root, name);
+    let tmp_dir = dir.with_extension("tmp");
+    if tmp_dir.exists() {
+        fs::remove_dir_all(&tmp_dir)?;
+    }
+    fs::create_dir_all(&tmp_dir)?;
+
+    fs::write(
+        tmp_dir.join("meta.toml"),
+        toml::to_string_pretty(group).map_err(|e| JanusError::Config(e.to_string()))?,
+    )?;
+    fs::write(tmp_dir.join("bundle.age"), bundle)?;
+
+    if dir.exists() {
+        fs::remove_dir_all(&dir)?;
+    }
+    fs::rename(&tmp_dir, &dir)?;
+
+    Ok(())
+}
+
 fn generate_and_distribute_key(
     name: &str,
     members: Vec<String>,
@@ -99,27 +126,11 @@ fn generate_and_distribute_key(
         created_at: Some(epoch_secs()),
     };
 
-    let dir = groups_dir(repo_root, name);
-    let tmp_dir = dir.with_extension("tmp");
-    if tmp_dir.exists() {
-        fs::remove_dir_all(&tmp_dir)?;
-    }
-    fs::create_dir_all(&tmp_dir)?;
-
-    fs::write(
-        tmp_dir.join("meta.toml"),
-        toml::to_string_pretty(&group).map_err(|e| JanusError::Config(e.to_string()))?,
-    )?;
-    fs::write(tmp_dir.join("bundle.age"), &bundle)?;
+    write_group_atomically(name, &group, &bundle, repo_root)?;
 
     let id_dir = local_identity_dir()?;
     fs::create_dir_all(&id_dir)?;
     write_secret_file(&local_identity_path(name)?, secret_key_str.as_bytes())?;
-
-    if dir.exists() {
-        fs::remove_dir_all(&dir)?;
-    }
-    fs::rename(&tmp_dir, &dir)?;
 
     Ok(group)
 }
@@ -167,7 +178,18 @@ pub fn load(name: &str, repo_root: &Path) -> Result<Group, JanusError> {
     }
 
     let content = fs::read_to_string(&meta_path)?;
-    toml::from_str::<Group>(&content).map_err(|e| JanusError::Config(e.to_string()))
+    let mut group =
+        toml::from_str::<Group>(&content).map_err(|e| JanusError::Config(e.to_string()))?;
+
+    if group.name != name {
+        return Err(JanusError::Config(format!(
+            "group directory name '{name}' does not match metadata name '{}'",
+            group.name
+        )));
+    }
+
+    group.members = dedup_members(&group.members);
+    Ok(group)
 }
 
 pub fn list(repo_root: &Path) -> Result<Vec<Group>, JanusError> {
@@ -218,8 +240,10 @@ pub fn decrypt_with_group(group_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>
         return Err(JanusError::GroupKeyNotImported(group_name.to_string()));
     }
 
-    let secret_key_str =
-        fs::read_to_string(&key_path).map_err(|e| JanusError::Decrypt(e.to_string()))?;
+    let secret_key_str = fs::read_to_string(&key_path).map_err(|e| JanusError::IdentityRead {
+        path: key_path.clone(),
+        source: e,
+    })?;
     let identity: age::x25519::Identity = secret_key_str
         .trim()
         .parse()

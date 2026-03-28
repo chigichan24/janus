@@ -140,33 +140,50 @@ fn cmd_decrypt(
     write_output(output, &plaintext)
 }
 
-fn print_group_result(group: &janus::Group, action: &str) {
+enum GroupAction {
+    Created,
+    Rotated,
+}
+
+impl GroupAction {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Rotated => "rotated",
+        }
+    }
+}
+
+fn print_group_result(group: &janus::Group, action: GroupAction) {
     let name = &group.name;
+    let label = action.label();
     eprintln!(
-        "{action} group '{name}' with {} members",
+        "{label} group '{name}' with {} members",
         group.members.len()
     );
-    if action == "rotated" {
-        eprintln!("new public key: {}", group.public_key);
-    } else {
-        eprintln!("public key: {}", group.public_key);
+    match action {
+        GroupAction::Rotated => eprintln!("new public key: {}", group.public_key),
+        GroupAction::Created => eprintln!("public key: {}", group.public_key),
     }
     eprintln!();
     eprintln!("next steps:");
     eprintln!("  git add .janus/groups/{name}/");
-    eprintln!("  git commit -m \"{action} group {name}\"");
+    eprintln!("  git commit -m \"{label} group {name}\"");
     eprintln!("  git push");
     eprintln!();
-    if action == "rotated" {
-        eprintln!("all members must re-import: janus group import {name}");
-    } else {
-        eprintln!("members can then run: janus group import {name}");
+    match action {
+        GroupAction::Rotated => {
+            eprintln!("all members must re-import: janus group import {name}");
+        }
+        GroupAction::Created => {
+            eprintln!("members can then run: janus group import {name}");
+        }
     }
 }
 
 fn cmd_group_create(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
     let group = janus::group::create(name, members, &repo_root()?)?;
-    print_group_result(&group, "created");
+    print_group_result(&group, GroupAction::Created);
     Ok(())
 }
 
@@ -210,6 +227,6 @@ fn cmd_group_show(name: &str) -> Result<(), janus::JanusError> {
 
 fn cmd_group_rotate(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
     let group = janus::group::rotate(name, members, &repo_root()?)?;
-    print_group_result(&group, "rotated");
+    print_group_result(&group, GroupAction::Rotated);
     Ok(())
 }
