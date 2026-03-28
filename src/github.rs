@@ -24,25 +24,28 @@ pub fn fetch_recipients(username: &str) -> Result<Vec<age::ssh::Recipient>, Janu
         source: e,
     })?;
 
-    let mut skipped = 0usize;
-    let recipients: Vec<age::ssh::Recipient> = body
-        .lines()
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| match line.parse::<age::ssh::Recipient>() {
-            Ok(r) => Some(r),
+    let mut recipients = Vec::new();
+    let mut unsupported = Vec::new();
+
+    for line in body.lines().filter(|l| !l.is_empty()) {
+        match line.parse::<age::ssh::Recipient>() {
+            Ok(r) => recipients.push(r),
             Err(_) => {
                 let prefix: String = line.split_whitespace().take(1).collect();
-                eprintln!("warning: skipping unsupported key type for '{username}': {prefix}");
-                skipped += 1;
-                None
+                unsupported.push(prefix);
             }
-        })
-        .collect();
+        }
+    }
+
+    for prefix in &unsupported {
+        eprintln!("warning: skipping unsupported key type for '{username}': {prefix}");
+    }
 
     if recipients.is_empty() {
-        if skipped > 0 {
+        if !unsupported.is_empty() {
             return Err(JanusError::KeyParse(format!(
-                "found {skipped} key(s) for '{username}' but none are age-compatible SSH keys"
+                "found {} key(s) for '{username}' but none are age-compatible SSH keys",
+                unsupported.len()
             )));
         }
         return Err(JanusError::NoKeysFound(username.to_string()));

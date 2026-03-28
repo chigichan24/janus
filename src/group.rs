@@ -42,12 +42,14 @@ fn groups_dir(repo_root: &Path, name: &str) -> std::path::PathBuf {
     repo_root.join(".janus").join("groups").join(name)
 }
 
+fn home_dir() -> Result<std::path::PathBuf, JanusError> {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .map_err(|_| JanusError::Config("HOME environment variable is not set".into()))
+}
+
 fn local_identity_dir() -> Result<std::path::PathBuf, JanusError> {
-    let home = std::env::var("HOME").map_err(|_| JanusError::Config("HOME not set".into()))?;
-    Ok(std::path::PathBuf::from(home)
-        .join(".config")
-        .join("janus")
-        .join("identities"))
+    Ok(home_dir()?.join(".config").join("janus").join("identities"))
 }
 
 fn local_identity_path(name: &str) -> Result<std::path::PathBuf, JanusError> {
@@ -71,6 +73,12 @@ fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), JanusError> {
 fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), JanusError> {
     fs::write(path, data)?;
     Ok(())
+}
+
+fn save_local_identity(name: &str, key_data: &[u8]) -> Result<(), JanusError> {
+    let id_dir = local_identity_dir()?;
+    fs::create_dir_all(&id_dir)?;
+    write_secret_file(&local_identity_path(name)?, key_data)
 }
 
 fn epoch_secs() -> u64 {
@@ -106,7 +114,9 @@ fn write_group_atomically(
     }
     if let Err(e) = fs::rename(&tmp_dir, &dir) {
         if backup_dir.exists() {
-            let _ = fs::rename(&backup_dir, &dir);
+            if let Err(restore_err) = fs::rename(&backup_dir, &dir) {
+                eprintln!("warning: failed to restore backup for group: {restore_err}");
+            }
         }
         return Err(e.into());
     }
@@ -139,14 +149,11 @@ fn generate_and_distribute_key(
 
     write_group_atomically(name, &group, &bundle, repo_root)?;
 
-    let id_dir = local_identity_dir()?;
-    fs::create_dir_all(&id_dir)?;
-    if let Err(e) = write_secret_file(&local_identity_path(name)?, secret_key_str.as_bytes()) {
+    if let Err(e) = save_local_identity(name, secret_key_str.as_bytes()) {
         eprintln!(
-            "warning: group created but local key save failed; \
+            "warning: group created but local key save failed ({e}); \
              run `janus group import {name}` to recover"
         );
-        return Err(e);
     }
 
     Ok(group)
