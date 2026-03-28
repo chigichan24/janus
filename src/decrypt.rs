@@ -4,6 +4,27 @@ use std::path::Path;
 
 use crate::error::JanusError;
 
+/// Core decryption logic: takes any age identity and ciphertext, returns plaintext.
+pub fn decrypt_with_identity(
+    identity: &dyn age::Identity,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, JanusError> {
+    let armored_reader = age::armor::ArmoredReader::new(ciphertext);
+    let decryptor = age::Decryptor::new_buffered(armored_reader)
+        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
+
+    let mut reader = decryptor
+        .decrypt(std::iter::once(identity))
+        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
+
+    let mut plaintext = vec![];
+    reader
+        .read_to_end(&mut plaintext)
+        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
+
+    Ok(plaintext)
+}
+
 /// Decrypts age-encrypted data using an SSH private key file.
 pub fn decrypt(identity_path: &Path, ciphertext: &[u8]) -> Result<Vec<u8>, JanusError> {
     let file = File::open(identity_path).map_err(|e| JanusError::IdentityRead {
@@ -30,18 +51,5 @@ pub fn decrypt(identity_path: &Path, ciphertext: &[u8]) -> Result<Vec<u8>, Janus
         age::ssh::Identity::Unencrypted(_) => {}
     }
 
-    let armored_reader = age::armor::ArmoredReader::new(ciphertext);
-    let decryptor = age::Decryptor::new_buffered(armored_reader)
-        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
-
-    let mut reader = decryptor
-        .decrypt(std::iter::once(&identity as &dyn age::Identity))
-        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
-
-    let mut plaintext = vec![];
-    reader
-        .read_to_end(&mut plaintext)
-        .map_err(|e| JanusError::Decrypt(e.to_string()))?;
-
-    Ok(plaintext)
+    decrypt_with_identity(&identity, ciphertext)
 }

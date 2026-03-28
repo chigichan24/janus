@@ -1,6 +1,7 @@
 use tempfile::TempDir;
 
 fn generate_ssh_keypair(dir: &std::path::Path) -> (std::path::PathBuf, age::ssh::Recipient) {
+    std::fs::create_dir_all(dir).unwrap();
     let key_path = dir.join("id_ed25519");
     let status = std::process::Command::new("ssh-keygen")
         .args([
@@ -24,7 +25,7 @@ fn generate_ssh_keypair(dir: &std::path::Path) -> (std::path::PathBuf, age::ssh:
 #[test]
 fn encrypt_decrypt_round_trip_with_ssh_key() {
     let dir = TempDir::new().expect("tempdir");
-    let (key_path, recipient) = generate_ssh_keypair(dir.path());
+    let (key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
 
     let plaintext = b"hello, janus!";
     let ciphertext = janus::encrypt(&[recipient], plaintext).expect("encrypt");
@@ -36,7 +37,7 @@ fn encrypt_decrypt_round_trip_with_ssh_key() {
 #[test]
 fn encrypt_armor_produces_ascii_output() {
     let dir = TempDir::new().expect("tempdir");
-    let (_key_path, recipient) = generate_ssh_keypair(dir.path());
+    let (_key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
 
     let output = janus::encrypt_armor(&[recipient], b"test message").expect("encrypt_armor");
     assert!(output.starts_with("-----BEGIN AGE ENCRYPTED FILE-----"));
@@ -46,7 +47,7 @@ fn encrypt_armor_produces_ascii_output() {
 #[test]
 fn encrypt_armor_decrypt_round_trip() {
     let dir = TempDir::new().expect("tempdir");
-    let (key_path, recipient) = generate_ssh_keypair(dir.path());
+    let (key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
 
     let plaintext = b"armored round trip";
     let armored = janus::encrypt_armor(&[recipient], plaintext).expect("encrypt_armor");
@@ -59,33 +60,18 @@ fn encrypt_armor_decrypt_round_trip() {
 fn group_create_and_encrypt_decrypt_round_trip() {
     let dir = TempDir::new().expect("tempdir");
     let repo_root = dir.path();
-    let ssh_dir = dir.path().join("ssh");
-    std::fs::create_dir_all(&ssh_dir).unwrap();
-    let (key_path, recipient) = generate_ssh_keypair(&ssh_dir);
+    let (key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
 
-    // Manually create a group (bypassing GitHub fetch)
-    let group_identity = age::x25519::Identity::generate();
-    let group_public = group_identity.to_public();
-    let group_secret = group_identity.to_string();
-    let secret_str = age::secrecy::ExposeSecret::expose_secret(&group_secret);
-
-    let bundle = janus::encrypt(&[recipient], secret_str.as_bytes()).expect("encrypt bundle");
-
-    let groups_dir = repo_root.join(".janus").join("groups").join("test-team");
-    std::fs::create_dir_all(&groups_dir).unwrap();
-    std::fs::write(
-        groups_dir.join("meta.toml"),
-        format!(
-            "name = \"test-team\"\nmembers = [\"testuser\"]\npublic_key = \"{}\"\ncreated_at = \"0\"",
-            group_public
-        ),
+    let group = janus::group::create_with_recipients(
+        "test-team",
+        &["testuser".into()],
+        &[recipient],
+        repo_root,
     )
-    .unwrap();
-    std::fs::write(groups_dir.join("bundle.age"), &bundle).unwrap();
+    .expect("create");
 
     janus::group::import("test-team", &key_path, repo_root).expect("import");
 
-    let group = janus::group::load("test-team", repo_root).expect("load");
     let ciphertext =
         janus::encrypt_for_group(&group, b"secret group message").expect("encrypt for group");
     let plaintext =
@@ -117,4 +103,42 @@ fn decrypt_with_invalid_identity() {
 
     let result = janus::decrypt(&bad_key, b"dummy ciphertext");
     assert!(result.is_err());
+}
+
+#[test]
+fn invalid_group_name_rejected() {
+    let dir = TempDir::new().expect("tempdir");
+    let result = janus::group::load("../escape", dir.path());
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid group name")
+    );
+}
+
+#[test]
+fn group_list_empty() {
+    let dir = TempDir::new().expect("tempdir");
+    let groups = janus::group::list(dir.path()).expect("list");
+    assert!(groups.is_empty());
+}
+
+#[test]
+fn group_members_deduplication() {
+    let dir = TempDir::new().expect("tempdir");
+    let (_key_path, recipient) = generate_ssh_keypair(&dir.path().join("ssh"));
+
+    let group = janus::group::create_with_recipients(
+        "dedup-test",
+        &["alice".into(), "alice".into(), "bob".into()],
+        &[recipient],
+        dir.path(),
+    )
+    .expect("create");
+
+    assert_eq!(group.members.len(), 2);
+    assert!(group.members.contains(&"alice".to_string()));
+    assert!(group.members.contains(&"bob".to_string()));
 }

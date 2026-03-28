@@ -5,6 +5,12 @@ use age::armor::{ArmoredWriter, Format};
 
 use crate::error::JanusError;
 
+fn make_encryptor<'a>(
+    recipients: impl Iterator<Item = &'a dyn age::Recipient>,
+) -> Result<Encryptor, JanusError> {
+    Encryptor::with_recipients(recipients).map_err(|e| JanusError::Encrypt(e.to_string()))
+}
+
 fn encrypt_to_writer<W: Write>(
     encryptor: Encryptor,
     plaintext: &[u8],
@@ -26,8 +32,7 @@ pub fn encrypt_for_recipients<'a>(
     recipients: impl Iterator<Item = &'a dyn age::Recipient>,
     plaintext: &[u8],
 ) -> Result<Vec<u8>, JanusError> {
-    let encryptor =
-        Encryptor::with_recipients(recipients).map_err(|e| JanusError::Encrypt(e.to_string()))?;
+    let encryptor = make_encryptor(recipients)?;
     let mut ciphertext = Vec::with_capacity(plaintext.len());
     encrypt_to_writer(encryptor, plaintext, &mut ciphertext)?;
     Ok(ciphertext)
@@ -49,8 +54,7 @@ pub fn encrypt_armor(
     recipients: &[age::ssh::Recipient],
     plaintext: &[u8],
 ) -> Result<String, JanusError> {
-    let encryptor = Encryptor::with_recipients(recipients.iter().map(|r| r as &dyn age::Recipient))
-        .map_err(|e| JanusError::Encrypt(e.to_string()))?;
+    let encryptor = make_encryptor(recipients.iter().map(|r| r as &dyn age::Recipient))?;
 
     let mut ciphertext = Vec::with_capacity(plaintext.len());
     let armored = ArmoredWriter::wrap_output(&mut ciphertext, Format::AsciiArmor)

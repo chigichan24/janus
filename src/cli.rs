@@ -40,7 +40,7 @@ pub enum Command {
     /// Decrypt a message using an SSH private key or a group key
     Decrypt {
         /// Path to SSH private key
-        #[arg(short = 'i', long = "identity")]
+        #[arg(short = 'i', long = "identity", conflicts_with = "group")]
         identity: Option<PathBuf>,
 
         /// Group name to decrypt with

@@ -76,18 +76,19 @@ fn read_input(input: Option<PathBuf>) -> Result<Vec<u8>, janus::JanusError> {
     }
 }
 
-fn expand_tilde(path: &Path) -> PathBuf {
+fn expand_tilde(path: &Path) -> Result<PathBuf, janus::JanusError> {
     let s = path.to_string_lossy();
     if let Some(rest) = s.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
+        let home = std::env::var("HOME").map_err(|_| {
+            janus::JanusError::Config("HOME environment variable is not set".into())
+        })?;
+        return Ok(PathBuf::from(home).join(rest));
     }
-    path.to_path_buf()
+    Ok(path.to_path_buf())
 }
 
-fn default_identity() -> PathBuf {
-    expand_tilde(&PathBuf::from("~/.ssh/id_ed25519"))
+fn default_identity() -> Result<PathBuf, janus::JanusError> {
+    expand_tilde(Path::new("~/.ssh/id_ed25519"))
 }
 
 fn repo_root() -> Result<PathBuf, janus::JanusError> {
@@ -129,71 +130,69 @@ fn cmd_decrypt(
     let plaintext = if let Some(group_name) = group {
         janus::decrypt_with_group(&group_name, &ciphertext)?
     } else {
-        let id_path = identity
-            .map(|p| expand_tilde(&p))
-            .unwrap_or_else(default_identity);
+        let id_path = match identity {
+            Some(p) => expand_tilde(&p)?,
+            None => default_identity()?,
+        };
         janus::decrypt(&id_path, &ciphertext)?
     };
 
     write_output(output, &plaintext)
 }
 
-fn cmd_group_create(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
-    let group = janus::group::create(name, members, &repo_root()?)?;
+fn print_group_result(group: &janus::Group, action: &str) {
+    let name = &group.name;
     eprintln!(
-        "created group '{}' with {} members",
-        group.name,
+        "{action} group '{name}' with {} members",
         group.members.len()
     );
-    eprintln!("public key: {}", group.public_key);
+    if action == "rotated" {
+        eprintln!("new public key: {}", group.public_key);
+    } else {
+        eprintln!("public key: {}", group.public_key);
+    }
     eprintln!();
     eprintln!("next steps:");
     eprintln!("  git add .janus/groups/{name}/");
-    eprintln!("  git commit -m \"add group {name}\"");
+    eprintln!("  git commit -m \"{action} group {name}\"");
     eprintln!("  git push");
     eprintln!();
-    eprintln!("members can then run: janus group import {name}");
+    if action == "rotated" {
+        eprintln!("all members must re-import: janus group import {name}");
+    } else {
+        eprintln!("members can then run: janus group import {name}");
+    }
+}
+
+fn cmd_group_create(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
+    let group = janus::group::create(name, members, &repo_root()?)?;
+    print_group_result(&group, "created");
     Ok(())
 }
 
 fn cmd_group_import(name: &str, identity: Option<PathBuf>) -> Result<(), janus::JanusError> {
-    let id_path = identity
-        .map(|p| expand_tilde(&p))
-        .unwrap_or_else(default_identity);
+    let id_path = match identity {
+        Some(p) => expand_tilde(&p)?,
+        None => default_identity()?,
+    };
     janus::group::import(name, &id_path, &repo_root()?)?;
     eprintln!("imported group key for '{name}'");
     Ok(())
 }
 
 fn cmd_group_list() -> Result<(), janus::JanusError> {
-    let root = repo_root()?;
-    let groups_dir = root.join(".janus").join("groups");
-    if !groups_dir.exists() {
+    let groups = janus::group::list(&repo_root()?)?;
+    if groups.is_empty() {
         eprintln!("no groups found");
         return Ok(());
     }
-
-    for entry in std::fs::read_dir(&groups_dir)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            let meta_path = entry.path().join("meta.toml");
-            if meta_path.exists() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                match janus::group::load(&name, &root) {
-                    Ok(group) => {
-                        println!(
-                            "{} ({} members: {})",
-                            group.name,
-                            group.members.len(),
-                            group.members.join(", ")
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("warning: failed to load group '{name}': {e}");
-                    }
-                }
-            }
-        }
+    for group in &groups {
+        println!(
+            "{} ({} members: {})",
+            group.name,
+            group.members.len(),
+            group.members.join(", ")
+        );
     }
     Ok(())
 }
@@ -203,24 +202,14 @@ fn cmd_group_show(name: &str) -> Result<(), janus::JanusError> {
     println!("name: {}", group.name);
     println!("public_key: {}", group.public_key);
     println!("members: {}", group.members.join(", "));
-    println!("created_at: {}", group.created_at);
+    if let Some(ts) = group.created_at {
+        println!("created_at: {ts}");
+    }
     Ok(())
 }
 
 fn cmd_group_rotate(name: &str, members: &[String]) -> Result<(), janus::JanusError> {
     let group = janus::group::rotate(name, members, &repo_root()?)?;
-    eprintln!(
-        "rotated group '{}' with {} members",
-        group.name,
-        group.members.len()
-    );
-    eprintln!("new public key: {}", group.public_key);
-    eprintln!();
-    eprintln!("next steps:");
-    eprintln!("  git add .janus/groups/{name}/");
-    eprintln!("  git commit -m \"rotate group {name}\"");
-    eprintln!("  git push");
-    eprintln!();
-    eprintln!("all members must re-import: janus group import {name}");
+    print_group_result(&group, "rotated");
     Ok(())
 }
