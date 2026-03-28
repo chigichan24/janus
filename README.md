@@ -2,7 +2,11 @@
 
 GitHub SSH key-based multi-recipient encryption CLI with shared group key management.
 
-Powered by [age](https://github.com/FiloSottile/age) encryption ([rage](https://github.com/str4d/rage) Rust implementation).
+Powered by 
+- [age](https://github.com/FiloSottile/age) encryption ([rage](https://github.com/str4d/rage) Rust implementation).
+
+Inspired by
+- [Technical Whitepaper LINE Encryption Overview](https://www.lycorp.co.jp/ja/privacy-security/line-encryption-whitepaper-ver2.2.pdf) (about Letter Sealing)
 
 ## Features
 
