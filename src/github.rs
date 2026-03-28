@@ -8,16 +8,15 @@ pub fn fetch_recipients(username: &str) -> Result<Vec<age::ssh::Recipient>, Janu
         source: e,
     })?;
 
-    let status = response.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Err(JanusError::NoKeysFound(username.to_string()));
     }
-    if !status.is_success() {
-        return Err(JanusError::KeyFetch {
+    let response = response
+        .error_for_status()
+        .map_err(|e| JanusError::KeyFetch {
             username: username.to_string(),
-            source: response.error_for_status().unwrap_err(),
-        });
-    }
+            source: e,
+        })?;
 
     let body = response.text().map_err(|e| JanusError::KeyFetch {
         username: username.to_string(),
