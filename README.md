@@ -9,6 +9,7 @@ Powered by [age](https://github.com/FiloSottile/age) encryption ([rage](https://
 - Encrypt messages for GitHub users using their SSH public keys
 - Multi-recipient encryption (any recipient can decrypt)
 - Shared group key management via Git repository
+- macOS Keychain integration with Touch ID for group key protection
 - ASCII armor support for text-safe output
 - Compatible with `rage`/`age` CLI tools
 - Usable as both a CLI tool and a Rust library
@@ -18,6 +19,16 @@ Powered by [age](https://github.com/FiloSottile/age) encryption ([rage](https://
 ```bash
 cargo install --path .
 ```
+
+### macOS: Enable Touch ID for group keys
+
+After installing, sign the binary to enable Keychain access with Touch ID:
+
+```bash
+codesign -s - --entitlements entitlements.plist $(which janus)
+```
+
+Without code signing, janus falls back to decrypting the group key bundle on each use.
 
 ## Usage
 
@@ -84,13 +95,23 @@ Duplicate members are automatically deduplicated.
 
 ## Architecture
 
+### Group key storage
+
+On macOS, group private keys are stored in the system Keychain with Touch ID / passcode protection. This means:
+
+- Keys are encrypted at rest by the Keychain
+- Accessing a key requires biometric or passcode authentication
+- Copying `~/.config/janus/` does not leak group keys
+
+On other platforms (or without code signing), janus falls back to decrypting the group key from `bundle.age` using your SSH key on each use. No group keys are persisted locally.
+
 ### Group key management
 
 The group key management works as follows:
 
 1. **Group creation**: Generates an age X25519 keypair. The private key is encrypted for each member using their GitHub SSH public keys.
 2. **Key distribution**: Encrypted key bundle (`.janus/groups/<name>/bundle.age`) is shared via Git.
-3. **Key import**: Members decrypt the bundle with their SSH key, storing the group private key locally.
+3. **Key import**: Members decrypt the bundle with their SSH key. On macOS, the key is cached in Keychain.
 4. **Encryption**: Messages are encrypted to the group's public key (single recipient, O(1)).
 5. **Key rotation**: New keypair generated on membership change. All members must re-import.
 
@@ -102,15 +123,14 @@ The group key management works as follows:
   meta.toml      # Group metadata (name, members, public key)
   bundle.age     # Group private key encrypted for all members
 
-# Local (never share)
-~/.config/janus/identities/
-  <name>.key     # Decrypted group private key
+# macOS Keychain (protected by Touch ID)
+Keychain item: service="com.janus.group-key", account=<group-name>
 ```
 
 ## Library usage
 
 ```rust
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // Fetch GitHub SSH keys and encrypt
 let recipients = janus::github::fetch_all_recipients(&["alice".into(), "bob".into()])?;
@@ -122,20 +142,20 @@ let armored = janus::encrypt_armor(&recipients, b"secret message")?;
 // Decrypt with SSH key
 let plaintext = janus::decrypt(Path::new("/home/user/.ssh/id_ed25519"), &ciphertext)?;
 
-// Decrypt with any age identity (SSH or X25519)
-let plaintext = janus::decrypt_with_identity(&identity, &ciphertext)?;
+// Group operations with GroupContext
+let ctx = janus::GroupContext {
+    repo_root: PathBuf::from("."),
+    identity_path: PathBuf::from("/home/user/.ssh/id_ed25519"),
+    keystore: janus::default_keystore(),
+};
 
-// Group operations
-let group = janus::group::create("team-a", &members, Path::new("."))?;
+let group = janus::group::create("team-a", &["alice".into()], &ctx)?;
 let group = janus::group::load("team-a", Path::new("."))?;
 let ciphertext = janus::encrypt_for_group(&group, b"secret")?;
-let plaintext = janus::decrypt_with_group("team-a", &ciphertext)?;
+let plaintext = janus::decrypt_with_group("team-a", &ciphertext, &ctx)?;
 
 // List all groups
 let groups = janus::group::list(Path::new("."))?;
-
-// Create group with pre-fetched recipients (useful for testing)
-let group = janus::group::create_with_recipients("team-a", &members, &recipients, Path::new("."))?;
 ```
 
 Note: The library API does not expand `~` in paths. Use absolute paths when calling library functions directly.
