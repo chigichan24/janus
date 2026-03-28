@@ -164,6 +164,7 @@ fn generate_and_distribute_key(
     Ok(group)
 }
 
+/// Creates a new group with a shared key, encrypting it for all members' GitHub SSH keys.
 pub fn create(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
     validate_group_name(name)?;
     let members = dedup_members(members);
@@ -171,6 +172,7 @@ pub fn create(name: &str, members: &[String], repo_root: &Path) -> Result<Group,
     generate_and_distribute_key(name, members, &recipients, repo_root)
 }
 
+/// Creates a new group with pre-fetched SSH recipients, bypassing GitHub API calls.
 pub fn create_with_recipients(
     name: &str,
     members: &[String],
@@ -182,6 +184,7 @@ pub fn create_with_recipients(
     generate_and_distribute_key(name, members, recipients, repo_root)
 }
 
+/// Imports a group's shared key by decrypting the bundle with the user's SSH private key.
 pub fn import(name: &str, identity_path: &Path, repo_root: &Path) -> Result<(), JanusError> {
     validate_group_name(name)?;
     let bundle_path = groups_dir(repo_root, name).join(BUNDLE_FILE);
@@ -193,6 +196,7 @@ pub fn import(name: &str, identity_path: &Path, repo_root: &Path) -> Result<(), 
     save_local_identity(name, &secret_key_bytes)
 }
 
+/// Loads group metadata from the repository.
 pub fn load(name: &str, repo_root: &Path) -> Result<Group, JanusError> {
     validate_group_name(name)?;
     let meta_path = groups_dir(repo_root, name).join(META_FILE);
@@ -215,6 +219,7 @@ pub fn load(name: &str, repo_root: &Path) -> Result<Group, JanusError> {
     Ok(group)
 }
 
+/// Lists all groups in the repository.
 pub fn list(repo_root: &Path) -> Result<Vec<Group>, JanusError> {
     let groups_path = repo_root.join(JANUS_DIR).join(GROUPS_DIR);
     let entries = match fs::read_dir(&groups_path) {
@@ -236,6 +241,7 @@ pub fn list(repo_root: &Path) -> Result<Vec<Group>, JanusError> {
     Ok(groups)
 }
 
+/// Rotates the group key with a new member list, generating a fresh keypair.
 pub fn rotate(name: &str, members: &[String], repo_root: &Path) -> Result<Group, JanusError> {
     validate_group_name(name)?;
     let meta_path = groups_dir(repo_root, name).join(META_FILE);
@@ -247,6 +253,7 @@ pub fn rotate(name: &str, members: &[String], repo_root: &Path) -> Result<Group,
     generate_and_distribute_key(name, members, &recipients, repo_root)
 }
 
+/// Encrypts plaintext using a group's public key.
 pub fn encrypt_for_group(group: &Group, plaintext: &[u8]) -> Result<Vec<u8>, JanusError> {
     let recipient: age::x25519::Recipient = group
         .public_key
@@ -258,6 +265,7 @@ pub fn encrypt_for_group(group: &Group, plaintext: &[u8]) -> Result<Vec<u8>, Jan
     )
 }
 
+/// Decrypts ciphertext using a group's locally stored private key.
 pub fn decrypt_with_group(group_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>, JanusError> {
     validate_group_name(group_name)?;
     let key_path = local_identity_path(group_name)?;
