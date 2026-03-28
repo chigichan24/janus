@@ -36,9 +36,28 @@ pub enum JanusError {
     #[error("group key for '{0}' not imported — run `janus group import {0}` first")]
     GroupKeyNotImported(String),
 
+    #[error("keychain error: {message}")]
+    Keychain {
+        message: String,
+        kind: KeychainErrorKind,
+    },
+
     #[error("I/O error")]
     Io(#[from] std::io::Error),
 
     #[error("configuration error: {0}")]
     Config(String),
+}
+
+/// Distinguishes keychain failure modes for fallback decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeychainErrorKind {
+    /// Touch ID or password authentication was denied by the user.
+    AuthenticationDenied,
+    /// Keychain access is not allowed (headless / CI environment).
+    AccessDenied,
+    /// Binary is not code-signed with required entitlements.
+    MissingEntitlement,
+    /// Any other keychain operation failure.
+    Other,
 }
