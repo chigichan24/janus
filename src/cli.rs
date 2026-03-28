@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "janus",
     version,
-    about = "GitHub SSH key-based encryption with LINE-style group key management"
+    about = "GitHub SSH key-based encryption with shared group key management"
 )]
 pub struct Cli {
     #[command(subcommand)]

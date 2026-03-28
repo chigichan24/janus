@@ -3,7 +3,7 @@ name = "janus"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "GitHub SSH key-based multi-recipient encryption with LINE-style group key management"
+description = "GitHub SSH key-based multi-recipient encryption with shared group key management"
 license = "MIT OR Apache-2.0"
 
 [lib]

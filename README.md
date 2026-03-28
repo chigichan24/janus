@@ -1,6 +1,6 @@
 # janus
 
-GitHub SSH key-based multi-recipient encryption CLI with LINE-style group key management.
+GitHub SSH key-based multi-recipient encryption CLI with shared group key management.
 
 Powered by [age](https://github.com/FiloSottile/age) encryption ([rage](https://github.com/str4d/rage) Rust implementation).
 
@@ -8,7 +8,7 @@ Powered by [age](https://github.com/FiloSottile/age) encryption ([rage](https://
 
 - Encrypt messages for GitHub users using their SSH public keys
 - Multi-recipient encryption (any recipient can decrypt)
-- LINE-style shared group key management via Git repository
+- Shared group key management via Git repository
 - ASCII armor support for text-safe output
 - Compatible with `rage`/`age` CLI tools
 - Usable as both a CLI tool and a Rust library
@@ -40,7 +40,7 @@ janus decrypt < encrypted.age
 janus decrypt -i ~/.ssh/id_rsa < encrypted.age
 ```
 
-### Group encryption (LINE-style shared key)
+### Group encryption (shared key)
 
 ```bash
 # Create a group (generates shared key, encrypts for members)
@@ -86,7 +86,7 @@ Duplicate members are automatically deduplicated.
 
 ### Group key management
 
-Inspired by [LINE's Letter Sealing protocol](https://www.lycorp.co.jp/ja/privacy-security/line-encryption-whitepaper-ver2.2.pdf):
+The group key management works as follows:
 
 1. **Group creation**: Generates an age X25519 keypair. The private key is encrypted for each member using their GitHub SSH public keys.
 2. **Key distribution**: Encrypted key bundle (`.janus/groups/<name>/bundle.age`) is shared via Git.
