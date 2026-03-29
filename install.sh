@@ -162,9 +162,11 @@ case ":${PATH}:" in
     ;;
 esac
 
-# Hint about shell completions.
-info ""
-info "To enable shell completions, add to your shell config:"
-info "  eval \"\$(janus completions bash)\"    # Bash"
-info "  eval \"\$(janus completions zsh)\"     # Zsh"
-info "  janus completions fish | source     # Fish"
+# Hint about shell completions (if the completions subcommand is available).
+if "${INSTALL_DIR}/${BINARY_NAME}" completions bash > /dev/null 2>&1; then
+  info ""
+  info "To enable shell completions, add to your shell config:"
+  info "  eval \"\$(janus completions bash)\"    # Bash"
+  info "  eval \"\$(janus completions zsh)\"     # Zsh"
+  info "  janus completions fish | source     # Fish"
+fi
