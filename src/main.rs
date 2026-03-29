@@ -37,11 +37,7 @@ fn run() -> Result<(), janus::JanusError> {
             input,
             output,
         } => cmd_decrypt(identity, group, input, output),
-        cli::Command::Completions { shell } => {
-            let mut cmd = cli::Cli::command();
-            generate(shell, &mut cmd, "janus", &mut std::io::stdout());
-            Ok(())
-        }
+        cli::Command::Completions { shell } => cmd_completions(shell),
         cli::Command::Group(cmd) => match cmd {
             cli::GroupCommand::Create { name, members } => cmd_group_create(&name, &members),
             cli::GroupCommand::Import { name, identity } => cmd_group_import(&name, identity),
@@ -108,6 +104,12 @@ fn build_group_context(
         identity_path: resolve_identity(identity)?,
         keystore: janus::default_keystore(),
     })
+}
+
+fn cmd_completions(shell: clap_complete::Shell) -> Result<(), janus::JanusError> {
+    let mut cmd = cli::Cli::command();
+    generate(shell, &mut cmd, "janus", &mut std::io::stdout());
+    Ok(())
 }
 
 fn cmd_encrypt(
