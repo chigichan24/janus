@@ -1,3 +1,4 @@
+use assert_cmd::Command;
 use tempfile::TempDir;
 
 fn generate_ssh_keypair(dir: &std::path::Path) -> (std::path::PathBuf, age::ssh::Recipient) {
@@ -166,4 +167,23 @@ fn group_members_deduplication() {
     assert_eq!(group.members.len(), 2);
     assert!(group.members.contains(&"alice".to_string()));
     assert!(group.members.contains(&"bob".to_string()));
+}
+
+#[test]
+fn completions_bash_produces_output() {
+    Command::cargo_bin("janus")
+        .unwrap()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("janus"));
+}
+
+#[test]
+fn completions_invalid_shell_fails() {
+    Command::cargo_bin("janus")
+        .unwrap()
+        .args(["completions", "invalid"])
+        .assert()
+        .failure();
 }
