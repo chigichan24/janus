@@ -73,7 +73,12 @@ detect_install_dir() {
 # Uses sed/grep to parse JSON without requiring jq.
 get_latest_version() {
   local url="https://api.github.com/repos/${REPO}/releases/latest"
-  curl -sSfL "${url}" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p'
+  local version
+  version=$(curl -sSfL "${url}" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+  if [ -z "${version}" ]; then
+    error "Failed to determine latest version. Check network connectivity or set JANUS_VERSION manually."
+  fi
+  echo "${version}"
 }
 
 # Verify SHA256 checksum of a downloaded file against a checksums file.
