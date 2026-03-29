@@ -117,10 +117,10 @@ verify_checksum() {
 
 # Print post-install hints (macOS codesign, PATH warning, shell completions).
 post_install_hints() {
-  if [ "${OS}" = "apple-darwin" ]; then
+  if [ "${OS}" = "apple-darwin" ] && [ -f "${INSTALL_DIR}/janus-entitlements.plist" ]; then
     info ""
     info "To enable Touch ID for group keys, run:"
-    info "  codesign -s - --entitlements entitlements.plist \$(which ${BINARY_NAME})"
+    info "  codesign -s - --entitlements ${INSTALL_DIR}/janus-entitlements.plist \$(which ${BINARY_NAME})"
   fi
 
   case ":${PATH}:" in
@@ -166,6 +166,11 @@ verify_checksum "${TMPDIR}/${ARCHIVE}" "${TMPDIR}/checksums.sha256"
 # Extract and install the binary.
 tar xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}"
 install -m 755 "${TMPDIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+
+# On macOS, also install entitlements.plist for codesign.
+if [ "${OS}" = "apple-darwin" ] && [ -f "${TMPDIR}/entitlements.plist" ]; then
+  install -m 644 "${TMPDIR}/entitlements.plist" "${INSTALL_DIR}/janus-entitlements.plist"
+fi
 
 # Verify the installed binary works.
 info "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
