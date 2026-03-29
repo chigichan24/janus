@@ -153,23 +153,23 @@ CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums
 INSTALL_DIR=$(ensure_install_dir)
 
 # Create a temporary directory and ensure it is cleaned up on exit.
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+JANUS_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$JANUS_TMPDIR"' EXIT
 
 info "Downloading ${BINARY_NAME} ${VERSION} for ${TARGET}..."
-curl -sSfL "${DOWNLOAD_URL}" -o "${TMPDIR}/${ARCHIVE}"
-curl -sSfL "${CHECKSUMS_URL}" -o "${TMPDIR}/checksums.sha256"
+curl -sSfL "${DOWNLOAD_URL}" -o "${JANUS_TMPDIR}/${ARCHIVE}"
+curl -sSfL "${CHECKSUMS_URL}" -o "${JANUS_TMPDIR}/checksums.sha256"
 
 # Verify checksum before extracting.
-verify_checksum "${TMPDIR}/${ARCHIVE}" "${TMPDIR}/checksums.sha256"
+verify_checksum "${JANUS_TMPDIR}/${ARCHIVE}" "${JANUS_TMPDIR}/checksums.sha256"
 
 # Extract and install the binary.
-tar xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}"
-install -m 755 "${TMPDIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+tar xzf "${JANUS_TMPDIR}/${ARCHIVE}" -C "${JANUS_TMPDIR}"
+install -m 755 "${JANUS_TMPDIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 
 # On macOS, also install entitlements.plist for codesign.
-if [ "${OS}" = "apple-darwin" ] && [ -f "${TMPDIR}/entitlements.plist" ]; then
-  install -m 644 "${TMPDIR}/entitlements.plist" "${INSTALL_DIR}/janus-entitlements.plist"
+if [ "${OS}" = "apple-darwin" ] && [ -f "${JANUS_TMPDIR}/entitlements.plist" ]; then
+  install -m 644 "${JANUS_TMPDIR}/entitlements.plist" "${INSTALL_DIR}/janus-entitlements.plist"
 fi
 
 # Verify the installed binary works.
