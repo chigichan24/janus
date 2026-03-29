@@ -109,7 +109,9 @@ fn build_group_context(
 fn cmd_completions(shell: clap_complete::Shell) -> Result<(), janus::JanusError> {
     let mut cmd = cli::Cli::command();
     let name = cmd.get_name().to_string();
-    generate(shell, &mut cmd, name, &mut std::io::stdout());
+    // clap_complete::generate returns () — I/O errors (e.g., broken pipe) may
+    // cause a panic inside write!. Using stdout().lock() for buffered output.
+    generate(shell, &mut cmd, name, &mut std::io::stdout().lock());
     Ok(())
 }
 
