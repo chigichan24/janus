@@ -34,6 +34,14 @@ codesign -s - --entitlements entitlements.plist $(which janus)
 
 Without code signing, janus falls back to decrypting the group key bundle on each use.
 
+## Shell Completions
+
+```bash
+eval "$(janus completions bash)"    # Bash
+eval "$(janus completions zsh)"     # Zsh
+janus completions fish | source     # Fish
+```
+
 ## Usage
 
 ### Direct encryption (by GitHub username)
