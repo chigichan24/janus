@@ -115,6 +115,32 @@ verify_checksum() {
   info "Checksum verified."
 }
 
+# Print post-install hints (macOS codesign, PATH warning, shell completions).
+post_install_hints() {
+  if [ "${OS}" = "apple-darwin" ]; then
+    info ""
+    info "To enable Touch ID for group keys, run:"
+    info "  codesign -s - --entitlements entitlements.plist \$(which ${BINARY_NAME})"
+  fi
+
+  case ":${PATH}:" in
+    *":${INSTALL_DIR}:"*) ;;
+    *)
+      info ""
+      info "WARNING: ${INSTALL_DIR} is not in your PATH."
+      info "Add it with: export PATH=\"${INSTALL_DIR}:\$PATH\""
+      ;;
+  esac
+
+  if "${INSTALL_DIR}/${BINARY_NAME}" completions bash > /dev/null 2>&1; then
+    info ""
+    info "To enable shell completions, add to your shell config:"
+    info "  eval \"\$(janus completions bash)\"    # Bash"
+    info "  eval \"\$(janus completions zsh)\"     # Zsh"
+    info "  janus completions fish | source     # Fish"
+  fi
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 OS=$(detect_os)
@@ -145,28 +171,4 @@ install -m 755 "${TMPDIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 info "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
 "${INSTALL_DIR}/${BINARY_NAME}" --version
 
-# On macOS, hint about Touch ID code signing.
-if [ "${OS}" = "apple-darwin" ]; then
-  info ""
-  info "To enable Touch ID for group keys, run:"
-  info "  codesign -s - --entitlements entitlements.plist \$(which ${BINARY_NAME})"
-fi
-
-# Warn if the install directory is not in PATH.
-case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *)
-    info ""
-    info "WARNING: ${INSTALL_DIR} is not in your PATH."
-    info "Add it with: export PATH=\"${INSTALL_DIR}:\$PATH\""
-    ;;
-esac
-
-# Hint about shell completions (if the completions subcommand is available).
-if "${INSTALL_DIR}/${BINARY_NAME}" completions bash > /dev/null 2>&1; then
-  info ""
-  info "To enable shell completions, add to your shell config:"
-  info "  eval \"\$(janus completions bash)\"    # Bash"
-  info "  eval \"\$(janus completions zsh)\"     # Zsh"
-  info "  janus completions fish | source     # Fish"
-fi
+post_install_hints
