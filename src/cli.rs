@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(
@@ -59,6 +60,13 @@ pub enum Command {
     /// Manage groups
     #[command(subcommand)]
     Group(GroupCommand),
+
+    /// Generate shell completion scripts
+    #[command(hide = true)]
+    Completions {
+        /// Shell to generate completions for (bash, zsh, fish, powershell, elvish)
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]

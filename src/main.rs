@@ -3,7 +3,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 
 mod cli;
 
@@ -36,6 +37,7 @@ fn run() -> Result<(), janus::JanusError> {
             input,
             output,
         } => cmd_decrypt(identity, group, input, output),
+        cli::Command::Completions { shell } => cmd_completions(shell),
         cli::Command::Group(cmd) => match cmd {
             cli::GroupCommand::Create { name, members } => cmd_group_create(&name, &members),
             cli::GroupCommand::Import { name, identity } => cmd_group_import(&name, identity),
@@ -102,6 +104,15 @@ fn build_group_context(
         identity_path: resolve_identity(identity)?,
         keystore: janus::default_keystore(),
     })
+}
+
+fn cmd_completions(shell: clap_complete::Shell) -> Result<(), janus::JanusError> {
+    let mut cmd = cli::Cli::command();
+    let name = cmd.get_name().to_string();
+    // clap_complete::generate returns () — I/O errors (e.g., broken pipe) may
+    // cause a panic inside write!. Using stdout().lock() for buffered output.
+    generate(shell, &mut cmd, name, &mut std::io::stdout().lock());
+    Ok(())
 }
 
 fn cmd_encrypt(
