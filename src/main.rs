@@ -3,7 +3,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 
 mod cli;
 
@@ -36,6 +37,11 @@ fn run() -> Result<(), janus::JanusError> {
             input,
             output,
         } => cmd_decrypt(identity, group, input, output),
+        cli::Command::Completions { shell } => {
+            let mut cmd = cli::Cli::command();
+            generate(shell, &mut cmd, "janus", &mut std::io::stdout());
+            Ok(())
+        }
         cli::Command::Group(cmd) => match cmd {
             cli::GroupCommand::Create { name, members } => cmd_group_create(&name, &members),
             cli::GroupCommand::Import { name, identity } => cmd_group_import(&name, identity),
