@@ -20,6 +20,14 @@ Inspired by
 
 ## Install
 
+### One-line install
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/chigichan24/janus/main/install.sh | bash
+```
+
+### From source
+
 ```bash
 cargo install --path .
 ```
