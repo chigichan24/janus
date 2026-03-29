@@ -108,7 +108,8 @@ fn build_group_context(
 
 fn cmd_completions(shell: clap_complete::Shell) -> Result<(), janus::JanusError> {
     let mut cmd = cli::Cli::command();
-    generate(shell, &mut cmd, "janus", &mut std::io::stdout());
+    let name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, name, &mut std::io::stdout());
     Ok(())
 }
 
