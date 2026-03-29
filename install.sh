@@ -54,6 +54,10 @@ detect_arch() {
 # Priority: $JANUS_INSTALL_DIR > /usr/local/bin (if writable) > ~/.local/bin
 detect_install_dir() {
   if [ -n "${JANUS_INSTALL_DIR:-}" ]; then
+    case "${JANUS_INSTALL_DIR}" in
+      /*) ;;
+      *)  error "JANUS_INSTALL_DIR must be an absolute path: ${JANUS_INSTALL_DIR}" ;;
+    esac
     mkdir -p "${JANUS_INSTALL_DIR}"
     echo "${JANUS_INSTALL_DIR}"
     return
