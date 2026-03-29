@@ -147,6 +147,9 @@ OS=$(detect_os)
 ARCH=$(detect_arch)
 TARGET="${ARCH}-${OS}"
 VERSION="${JANUS_VERSION:-$(get_latest_version)}"
+if ! [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+  error "Invalid version format: ${VERSION} (expected vX.Y.Z)"
+fi
 ARCHIVE="${BINARY_NAME}-${VERSION}-${TARGET}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
 CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.sha256"
