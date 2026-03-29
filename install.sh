@@ -50,9 +50,9 @@ detect_arch() {
   esac
 }
 
-# Determine where to install the binary.
+# Determine where to install the binary and create the directory if needed.
 # Priority: $JANUS_INSTALL_DIR > /usr/local/bin (if writable) > ~/.local/bin
-detect_install_dir() {
+ensure_install_dir() {
   if [ -n "${JANUS_INSTALL_DIR:-}" ]; then
     case "${JANUS_INSTALL_DIR}" in
       /*) ;;
@@ -124,7 +124,7 @@ VERSION="${JANUS_VERSION:-$(get_latest_version)}"
 ARCHIVE="${BINARY_NAME}-${VERSION}-${TARGET}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
 CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.sha256"
-INSTALL_DIR=$(detect_install_dir)
+INSTALL_DIR=$(ensure_install_dir)
 
 # Create a temporary directory and ensure it is cleaned up on exit.
 TMPDIR=$(mktemp -d)
