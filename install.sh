@@ -28,18 +28,18 @@ error() {
 
 # ── Detection functions ──────────────────────────────────────────────────────
 
-# Detect the operating system and return the Rust target OS triple component.
+# Detect the operating system and return the archive OS component.
 detect_os() {
   local os
   os=$(uname -s)
   case "${os}" in
-    Linux)  echo "unknown-linux-gnu" ;;
-    Darwin) echo "apple-darwin" ;;
+    Linux)  echo "linux" ;;
+    Darwin) echo "macos" ;;
     *)      error "Unsupported operating system: ${os}" ;;
   esac
 }
 
-# Detect the CPU architecture and return the Rust target arch component.
+# Detect the CPU architecture and return the archive arch component.
 detect_arch() {
   local arch
   arch=$(uname -m)
@@ -117,7 +117,7 @@ verify_checksum() {
 
 # Print post-install hints (macOS codesign, PATH warning, shell completions).
 post_install_hints() {
-  if [ "${OS}" = "apple-darwin" ] && [ -f "${INSTALL_DIR}/janus-entitlements.plist" ]; then
+  if [ "${OS}" = "macos" ] && [ -f "${INSTALL_DIR}/janus-entitlements.plist" ]; then
     info ""
     info "To enable Touch ID for group keys, run:"
     info "  codesign -s - --entitlements ${INSTALL_DIR}/janus-entitlements.plist \$(which ${BINARY_NAME})"
@@ -171,7 +171,7 @@ tar xzf "${JANUS_TMPDIR}/${ARCHIVE}" -C "${JANUS_TMPDIR}"
 install -m 755 "${JANUS_TMPDIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 
 # On macOS, also install entitlements.plist for codesign.
-if [ "${OS}" = "apple-darwin" ] && [ -f "${JANUS_TMPDIR}/entitlements.plist" ]; then
+if [ "${OS}" = "macos" ] && [ -f "${JANUS_TMPDIR}/entitlements.plist" ]; then
   install -m 644 "${JANUS_TMPDIR}/entitlements.plist" "${INSTALL_DIR}/janus-entitlements.plist"
 fi
 
