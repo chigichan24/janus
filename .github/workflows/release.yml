@@ -44,7 +44,8 @@ jobs:
         env:
           BUILD_TOOL: ${{ matrix.build_tool }}
           TARGET: ${{ matrix.target }}
-        run: "${BUILD_TOOL}" build --release --target "${TARGET}"
+        run: |
+          "${BUILD_TOOL}" build --release --target "${TARGET}"
 
       - name: Package
         env:
