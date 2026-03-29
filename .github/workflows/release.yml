@@ -18,16 +18,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            use_cross: false
+            build_tool: cargo
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            use_cross: true
+            build_tool: cross
           - target: x86_64-apple-darwin
             os: macos-13
-            use_cross: false
+            build_tool: cargo
           - target: aarch64-apple-darwin
             os: macos-latest
-            use_cross: false
+            build_tool: cargo
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,34 +37,40 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cross
-        if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        if: matrix.build_tool == 'cross'
+        run: cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5
 
       - name: Build
-        run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        env:
+          BUILD_TOOL: ${{ matrix.build_tool }}
+          TARGET: ${{ matrix.target }}
+        run: "${BUILD_TOOL}" build --release --target "${TARGET}"
 
       - name: Package
+        env:
+          TARGET: ${{ matrix.target }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           mkdir -p staging
-          cp target/${{ matrix.target }}/release/janus staging/
-          if [[ "${{ matrix.target }}" == *"apple"* ]]; then
+          cp "target/${TARGET}/release/janus" staging/
+          if [[ "${TARGET}" == *"apple"* ]]; then
             cp entitlements.plist staging/
           fi
           cd staging
-          tar czf ../janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
+          tar czf "../janus-${REF_NAME}-${TARGET}.tar.gz" *
           cd ..
 
       - name: Generate checksum
+        env:
+          TARGET: ${{ matrix.target }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            shasum -a 256 janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+          ARCHIVE="janus-${REF_NAME}-${TARGET}.tar.gz"
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           else
-            sha256sum janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           fi
 
       - uses: actions/upload-artifact@v4
@@ -93,10 +99,12 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           cd artifacts
-          gh release create ${{ github.ref_name }} \
-            --repo ${{ github.repository }} \
-            --title "${{ github.ref_name }}" \
+          gh release create "${REF_NAME}" \
+            --repo "${REPO}" \
+            --title "${REF_NAME}" \
             --generate-notes \
             *.tar.gz checksums.sha256
