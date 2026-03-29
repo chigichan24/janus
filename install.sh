@@ -89,7 +89,7 @@ verify_checksum() {
   filename=$(basename "${file}")
 
   local expected
-  expected=$(grep "${filename}" "${checksums}" | awk '{print $1}')
+  expected=$(awk -v file="${filename}" '$2 == file || $2 == ("*" file) {print $1; exit}' "${checksums}")
 
   if [ -z "${expected}" ]; then
     error "No checksum found for ${filename}"
