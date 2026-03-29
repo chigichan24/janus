@@ -176,6 +176,7 @@ fn completions_bash_produces_output() {
         .args(["completions", "bash"])
         .assert()
         .success()
+        .stdout(predicates::str::contains("complete"))
         .stdout(predicates::str::contains("janus"));
 }
 
@@ -185,5 +186,6 @@ fn completions_invalid_shell_fails() {
         .unwrap()
         .args(["completions", "invalid"])
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicates::str::contains("invalid"));
 }
