@@ -174,6 +174,11 @@ fi
 
 # Verify the installed binary works.
 info "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
-"${INSTALL_DIR}/${BINARY_NAME}" --version
+if "${INSTALL_DIR}/${BINARY_NAME}" --version 2>/dev/null; then
+  :
+else
+  info "WARNING: ${BINARY_NAME} was installed but could not be executed."
+  info "On macOS, you may need to allow it in System Preferences > Privacy & Security."
+fi
 
 post_install_hints
