@@ -19,15 +19,19 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             build_tool: cargo
+            archive_name: x86_64-linux
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             build_tool: cross
+            archive_name: aarch64-linux
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
             build_tool: cargo
+            archive_name: x86_64-macos
           - target: aarch64-apple-darwin
             os: macos-latest
             build_tool: cargo
+            archive_name: aarch64-macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +55,7 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           REF_NAME: ${{ github.ref_name }}
+          ARCHIVE_NAME: ${{ matrix.archive_name }}
         run: |
           mkdir -p staging
           cp "target/${TARGET}/release/janus" staging/
@@ -58,16 +63,16 @@ jobs:
             cp entitlements.plist staging/
           fi
           cd staging
-          tar czf "../janus-${REF_NAME}-${TARGET}.tar.gz" *
+          tar czf "../janus-${REF_NAME}-${ARCHIVE_NAME}.tar.gz" *
           cd ..
 
       - name: Generate checksum
         env:
-          TARGET: ${{ matrix.target }}
           REF_NAME: ${{ github.ref_name }}
+          ARCHIVE_NAME: ${{ matrix.archive_name }}
           RUNNER_OS: ${{ runner.os }}
         run: |
-          ARCHIVE="janus-${REF_NAME}-${TARGET}.tar.gz"
+          ARCHIVE="janus-${REF_NAME}-${ARCHIVE_NAME}.tar.gz"
           if [[ "${RUNNER_OS}" == "macOS" ]]; then
             shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           else
@@ -76,10 +81,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: janus-${{ matrix.target }}
+          name: janus-${{ matrix.archive_name }}
           path: |
-            janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
-            janus-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+            janus-${{ github.ref_name }}-${{ matrix.archive_name }}.tar.gz
+            janus-${{ github.ref_name }}-${{ matrix.archive_name }}.tar.gz.sha256
 
   release:
     needs: build
